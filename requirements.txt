@@ -1,0 +1,9 @@
+emoji
+nltk
+numpy
+pandas
+Pillow
+google-cloud-vision
+protobuf<7
+twython
+validators

@@ -2,7 +2,7 @@ import io
 import sys, os
 
 pathname = os.path.dirname(sys.argv[0])
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = pathname+"/Extensions/Sentiment247-4d3b36eedd95.json"
+os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", pathname+"/Extensions/feelz-vision.json")
 
 def detect_text(path):
     """Detects text in the file."""

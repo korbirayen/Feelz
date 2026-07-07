@@ -13,8 +13,12 @@ import pandas as pd
 import numpy as np
 
 import os, sys
+from pathlib import Path
+import types
 
 import pickle
+
+MODEL_PATH = Path(__file__).resolve().parent / "Models" / "classifier.pickle"
 
 def process_message(message, lower_case = True, stem = True, stop_words = True, gram = 2):
     if lower_case:
@@ -137,9 +141,23 @@ class TweetClassifier(object):
             result[i] = int(self.classify(processed_message))
         return result
 
+
+def _ensure_pickle_compatibility():
+    main_module = sys.modules.get("__main__")
+    if main_module is not None and not hasattr(main_module, "TweetClassifier"):
+        setattr(main_module, "TweetClassifier", TweetClassifier)
+
+    if "pandas.core.indexes.numeric" not in sys.modules:
+        numeric_module = types.ModuleType("pandas.core.indexes.numeric")
+        numeric_module.Int64Index = pd.Index
+        numeric_module.UInt64Index = pd.Index
+        numeric_module.Float64Index = pd.Index
+        sys.modules["pandas.core.indexes.numeric"] = numeric_module
+
 def RunModel(processed_text):
-    pathname = os.path.dirname(sys.argv[0])
-    model = pickle.load(open(pathname+'/Extensions/Models/classifier.pickle','rb'))
+    _ensure_pickle_compatibility()
+    with MODEL_PATH.open('rb') as model_file:
+        model = pickle.load(model_file)
     result = model.classify(processed_text)
     return result
 

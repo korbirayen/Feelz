@@ -15,22 +15,57 @@ import glob
 
 from Extensions import vision, DepressionScore, PolarityScore
 from Extensions.DepressionScore import TweetClassifier
+from Extensions.branding import APP_NAME, LANDING_LINES, LANDING_TITLE
+from Extensions.theme_store import ThemeStore
 import pickle
 
 
 #=========================Main Window=============================
 class App:
-    def __init__(self, master): 
-        try:       
-            c.execute("SELECT * FROM Color")
-            colors = c.fetchall()
-        except sqlite3.OperationalError:
-            messagebox.showerror("Database Error","Can't Access Database")
+    def get_theme(self):
+        return self.theme_store.load()
 
-        for color in colors:
-            primary = color[0] #'#ffffff' #181818
-            foreground = color[1] #'#222222' #ffffff
-            gray = color[2] #'#e0e0e0' #3d3d3d
+    def apply_theme(self, theme):
+        primary, foreground, gray = theme.as_tuple()
+        self.master.configure(bg=primary)
+        if hasattr(self, 'nav_frame'):
+            self.nav_frame.configure(bg=primary)
+            for widget in self.nav_frame.winfo_children():
+                widget.configure(bg=primary, activebackground=primary)
+                if str(widget).split('!')[-1] == 'label':
+                    widget.configure(fg=gray)
+
+        if hasattr(self, 'top_frame'):
+            self.top_frame.configure(bg=primary)
+
+        if hasattr(self, 'settings_lbl'):
+            self.settings_lbl.configure(bg=primary, fg=foreground)
+
+        if hasattr(self, 'main_frame'):
+            self.main_frame.configure(bg=gray)
+            for widget in self.main_frame.winfo_children():
+                if str(widget).split('!')[-1][0] == 'l':
+                    widget.configure(bg=gray, fg=foreground)
+                if str(widget).split('!')[-1][0:5] == 'frame':
+                    widget.configure(bg=primary)
+                    for widget2 in widget.winfo_children():
+                        if str(widget2).split('!')[-1][0] == 'l':
+                            widget2.configure(bg=primary, fg=foreground)
+                        else:
+                            widget2.configure(bg=primary, fg=foreground, activebackground=primary, selectcolor=primary)
+
+    def show_loading(self, primary, foreground, callback, delay=3000):
+        load_lbl = loading.ImageLabel(self.master, bg=primary)
+        load_lbl.place(relx=0.45, rely=0.40, width=70, height=70)
+        load_lbl.load('images/load.gif')
+        self.loading = tk.Label(self.master, text='Getting things ready...', fg=foreground, bg=primary, font=('normal',9))
+        self.loading.place(relx=0.425, rely=0.49)
+        self.master.after(delay, callback)
+
+    def __init__(self, master): 
+        self.theme_store = ThemeStore(conn)
+        theme = self.get_theme()
+        primary, foreground, gray = theme.as_tuple()
         
         w = 900 # window width
         h = 650 # window height
@@ -43,7 +78,7 @@ class App:
 
         master.iconbitmap("images/logo_img.ico")
         self.master = master
-        self.master.title("Sentiment247")
+        self.master.title(APP_NAME)
         self.master.geometry('%dx%d+%d+%d' % (w, h, x, y))
         self.master.configure(background=primary)
         self.master.resizable(False,False)
@@ -274,37 +309,52 @@ class App:
                 def depressive_scorer(processed_text):
                     """This Function is will assign depression model and scores to
                     respective labels and configuring size of frames when scores are calculated"""
-                    result = DepressionScore.RunModel(processed_text)
+                    try:
+                        result = DepressionScore.RunModel(processed_text)
+                    except Exception as error:
+                        messagebox.showerror("Depression checker error", f"The depression model could not be loaded:\n{error}")
+                        return
+
+                    def ensure_result_card():
+                        if not hasattr(self, 'result_card') or not self.result_card.winfo_exists():
+                            self.result_card = tk.Frame(self.main_frame, bg=primary, relief='groove', bd=1)
+                            self.result_title = tk.Label(self.result_card, text='Ready to analyze', font=('Segoe UI', 11, 'bold'), fg=foreground, bg=primary)
+                            self.result_title.place(relx=0.03, rely=0.16)
+                            self.result_detail = tk.Label(self.result_card, text='The checker will highlight the result and keep the interface clear.', font=('Segoe UI', 9), fg=foreground, bg=primary)
+                            self.result_detail.place(relx=0.03, rely=0.56)
+
                     # Enable Frames
-                    self.text_box.place(relx=0.17,rely=0.07,width=520,height=200)
-                    self.submit.place(relx=0.682,rely=0.45,width=100,height=30)
-                    self.pos_frame.place(relx=0.28,rely=0.65)
-                    self.dep_frame.place(relx=0.53,rely=0.65)
-                    
+                    self.text_box.place(relx=0.17,rely=0.07,width=520,height=190)
+                    self.submit.place(relx=0.682,rely=0.44,width=100,height=32)
+                    ensure_result_card()
+                    self.result_card.place(relx=0.17,rely=0.50,width=520,height=56)
+                    self.pos_frame.place(relx=0.28,rely=0.72)
+                    self.dep_frame.place(relx=0.53,rely=0.72)
+
                     for w in self.pos_frame.winfo_children(): # Positive Frame
                         w.configure(state=tk.NORMAL)
                     for w in self.dep_frame.winfo_children(): # Depressive Frame
                         w.configure(state=tk.NORMAL)
-                        
-                    if result: # If the tweet is depressive
+
+                    if result:
+                        self.result_title.configure(text='Result: depressive tone detected', fg='#a01820')
+                        self.result_detail.configure(text='The model leaned toward the depressive class for this input.')
                         self.dep_frame.configure(width=150,height=190)
                         self.pos_frame.configure(width=130,height=150)
-                        for w in self.pos_frame.winfo_children(): # Depressive Frame
+                        for w in self.pos_frame.winfo_children():
                             w.configure(state=tk.DISABLED)
-                    else: # If the tweet is positive
+                    else:
+                        self.result_title.configure(text='Result: no strong depressive tone detected', fg='#0f6b2f')
+                        self.result_detail.configure(text='The model leaned toward the positive class for this input.')
                         self.dep_frame.configure(width=130,height=150)
                         self.pos_frame.configure(width=150,height=190)
-                        for w in self.dep_frame.winfo_children(): # Depressive Frame
+                        for w in self.dep_frame.winfo_children():
                             w.configure(state=tk.DISABLED)
                                        
                 def text():
-                    self.master.title("Sentiment247  >  Text")
+                    self.master.title(f"{APP_NAME}  >  Text")
                     self.settings.place(relx=0.20,rely=0.93)
-                    # Get current colors
-                    c.execute("SELECT * FROM Color")
-                    colors = c.fetchall()
-                    for color in colors:
-                        primary, foreground, gray = color[0], color[1], color[2]
+                    primary, foreground, gray = self.get_theme().as_tuple()
                     # Configure Colour
                     self.text_btn.configure(bg=gray)
                     self.doc_btn.configure(bg=primary)
@@ -324,12 +374,8 @@ class App:
                         
                     #=============Polarity and Depression functions===========
                     def polarity():
-                        self.master.title("Sentiment247  >  Text  >  Polarity")
-                        # Get current colors
-                        c.execute("SELECT * FROM Color")
-                        colors = c.fetchall()
-                        for color in colors:
-                            primary, foreground, gray = color[0], color[1], color[2]
+                        self.master.title(f"{APP_NAME}  >  Text  >  Polarity")
+                        primary, foreground, gray = self.get_theme().as_tuple()
                         self.btn_lbl.place(relx=0,rely=0.91)
                         self.pol_btn.configure(fg=foreground)
                         self.dep_btn.configure(fg=gray)
@@ -337,11 +383,18 @@ class App:
                         for w in self.main_frame.winfo_children():
                             w.destroy()
                         # Text Widget
-                        self.text_box = tk.Text(self.main_frame,font=('normal',10),bg=primary,fg=foreground,insertbackground=foreground,relief='groove',bd=1)
-                        self.text_box.place(relx=0.17,rely=0.07,width=520,height=200)
+                        self.text_box = tk.Text(self.main_frame,font=('Segoe UI',11),bg=primary,fg=foreground,insertbackground=foreground,relief='groove',bd=1,wrap='word')
+                        self.text_box.place(relx=0.17,rely=0.07,width=520,height=190)
                         # Place Holder for text widget
-                        self.text_box.insert(tk.END,'Some text goes in here...')
+                        self.text_box.insert(tk.END,'Type a few sentences here and press Submit to check the tone.')
                         self.text_box.bind("<FocusIn>", lambda args: self.text_box.delete("1.0",tk.END))
+
+                        self.result_card = tk.Frame(self.main_frame,bg=primary,relief='groove',bd=1)
+                        self.result_card.place(relx=0.17,rely=0.50,width=520,height=56)
+                        self.result_title = tk.Label(self.result_card,text='Ready to analyze',font=('Segoe UI',11,'bold'),fg=foreground,bg=primary)
+                        self.result_title.place(relx=0.03,rely=0.10)
+                        self.result_detail = tk.Label(self.result_card,text='The checker will highlight the result and keep the interface clear.',font=('Segoe UI',8),fg=foreground,bg=primary)
+                        self.result_detail.place(relx=0.03,rely=0.48)
         
                         def submit():
                             content = self.text_box.get("1.0",'end-1c') # The content of the text box
@@ -355,7 +408,7 @@ class App:
                         hover.Hover(self.submit)
                         #========Positive Frame======
                         self.pos_frame = tk.Frame(self.main_frame,width=130,height=170,bg=primary,relief='raised',bd=1)
-                        self.pos_frame.place(relx=0.17,rely=0.65)
+                        self.pos_frame.place(relx=0.17,rely=0.72)
                         # Positive Image
                         self.happy_img = tk.PhotoImage(file='images/happy.png')
                         self.happy_lbl_image = tk.Label(self.pos_frame,bg=primary,image=self.happy_img)
@@ -368,7 +421,7 @@ class App:
                         self.positive_per.place(relx=0.415,rely=0.7)
                         #========Neutral Frame========
                         self.neu_frame = tk.Frame(self.main_frame,width=130,height=170,bg=primary,relief='raised',bd=1)
-                        self.neu_frame.place(relx=0.41,rely=0.65)
+                        self.neu_frame.place(relx=0.41,rely=0.72)
                         # Neutral Image
                         self.neutral_img = tk.PhotoImage(file='images/neutral.png')
                         self.neutral_lbl_image = tk.Label(self.neu_frame,bg=primary,image=self.neutral_img)
@@ -381,7 +434,7 @@ class App:
                         self.neutral_per.place(relx=0.415,rely=0.7)
                         #========Negative Frame======
                         self.neg_frame = tk.Frame(self.main_frame,width=130,height=170,bg=primary,relief='raised',bd=1)
-                        self.neg_frame.place(relx=0.64,rely=0.65)
+                        self.neg_frame.place(relx=0.64,rely=0.72)
                         # Negative Image
                         self.negative_img = tk.PhotoImage(file='images/sad.png')
                         self.negative_lbl_image = tk.Label(self.neg_frame,bg=primary,image=self.negative_img)
@@ -405,12 +458,8 @@ class App:
                     self.pol_btn.place(relx=0.02,rely=0.64,width=410)
         
                     def depression():
-                        self.master.title("Sentiment247  >  Text  >  Depression")
-                        # Get current colors
-                        c.execute("SELECT * FROM Color")
-                        colors = c.fetchall()
-                        for color in colors:
-                            primary, foreground, gray = color[0], color[1], color[2]
+                        self.master.title(f"{APP_NAME}  >  Text  >  Depression")
+                        primary, foreground, gray = self.get_theme().as_tuple()
                         self.btn_lbl.place(relx=0.51,rely=0.91)
                         self.pol_btn.configure(fg=gray)
                         self.dep_btn.configure(fg=foreground)  
@@ -427,10 +476,8 @@ class App:
                     
                         def submit():
                             content = self.text_box.get("1.0",'end-1c') # The content of the text box
-                            if content == "":
+                            if not content.strip():
                                 messagebox.showerror("Entry error","You can not perform sentiment analysis on an empty text box")
-                            elif type(content) == int:
-                                messagebox.showerror("Entry error","You can not perform sentiment analysis on a number")
                             else:
                                 for w in self.main_frame.winfo_children():
                                     w.place_forget()
@@ -438,30 +485,50 @@ class App:
                                 processed = DepressionScore.process_message(content)
                                 depressive_scorer(processed)                               
                         # Submit Button
-                        self.submit = tk.Button(self.main_frame,text='Submit',bg='#ecb22e',fg=primary,font=('normal',8,'bold'),bd=0,command=submit)
-                        self.submit.place(relx=0.682,rely=0.45,width=100,height=30)
+                        self.submit = tk.Button(self.main_frame,text='Submit',bg='#ecb22e',fg=primary,font=('Segoe UI',9,'bold'),bd=0,activebackground='#d7a51e',command=submit)
+                        self.submit.place(relx=0.682,rely=0.44,width=100,height=32)
                         hover.Hover(self.submit)
                         #========Positive Frame======
                         self.pos_frame = tk.Frame(self.main_frame,width=130,height=150,bg=primary,relief='raised',bd=1)
-                        self.pos_frame.place(relx=0.28,rely=0.65)
+                        self.pos_frame.place(relx=0.28,rely=0.68)
                         # Positive Image
                         self.happy_img = tk.PhotoImage(file='images/happy.png')
                         self.happy_lbl = tk.Label(self.pos_frame,bg=primary,image=self.happy_img)
                         self.happy_lbl.place(relx=0.26,rely=0.09)
                         # Positive Label
-                        self.positive_lbl = tk.Label(self.pos_frame,text='Positive',font=('normal',9,'bold'),fg='#008000',bg='#9de19d')
+                        self.positive_lbl = tk.Label(self.pos_frame,text='Positive',font=('Segoe UI',9,'bold'),fg='#0f6b2f',bg='#ccefd7')
                         self.positive_lbl.place(relx=0.24,rely=0.65,width=70,height=20)
 
                         #========Depressive Frame======
                         self.dep_frame = tk.Frame(self.main_frame,width=130,height=150,bg=primary,relief='raised',bd=1)
-                        self.dep_frame.place(relx=0.53,rely=0.65)
+                        self.dep_frame.place(relx=0.53,rely=0.68)
                         # Depressive Image
                         self.depressive_img = tk.PhotoImage(file='images/sad.png')
                         self.depressive_lbl = tk.Label(self.dep_frame,bg=primary,image=self.depressive_img)
                         self.depressive_lbl.place(relx=0.26,rely=0.09)
                         # Depressive Label
-                        self.depressive_lbl = tk.Label(self.dep_frame,text='Depressive',font=('normal',9,'bold'),fg='#ec1c24',bg='#f6a4a8')
+                        self.depressive_lbl = tk.Label(self.dep_frame,text='Depressive',font=('Segoe UI',9,'bold'),fg='#a01820',bg='#f5c6ca')
                         self.depressive_lbl.place(relx=0.24,rely=0.65,width=70,height=20)
+
+                        def set_result_state(is_depressive):
+                            if is_depressive:
+                                self.result_title.configure(text='Result: depressive tone detected', fg='#a01820')
+                                self.result_detail.configure(text='The model leaned toward the depressive class for this input.')
+                                self.dep_frame.configure(width=150,height=190)
+                                self.pos_frame.configure(width=130,height=150)
+                                for w in self.pos_frame.winfo_children():
+                                    w.configure(state=tk.DISABLED)
+                                for w in self.dep_frame.winfo_children():
+                                    w.configure(state=tk.NORMAL)
+                            else:
+                                self.result_title.configure(text='Result: no strong depressive tone detected', fg='#0f6b2f')
+                                self.result_detail.configure(text='The model leaned toward the positive class for this input.')
+                                self.dep_frame.configure(width=130,height=150)
+                                self.pos_frame.configure(width=150,height=190)
+                                for w in self.dep_frame.winfo_children():
+                                    w.configure(state=tk.DISABLED)
+                                for w in self.pos_frame.winfo_children():
+                                    w.configure(state=tk.NORMAL)
                         
                         # Disable Frame Content By Defalult
                         for w in self.pos_frame.winfo_children(): # Positive Frame
@@ -483,13 +550,9 @@ class App:
                 self.text_btn.place(relx=0.1,rely=0.16,width=67,height=50)
                 tooltip.CreateToolTip(self.text_btn,'Type text')
                 def doc():
-                    self.master.title("Sentiment247  >  File")
+                    self.master.title(f"{APP_NAME}  >  File")
                     self.settings.place(relx=0.20,rely=0.93)
-                    # Get current colors
-                    c.execute("SELECT * FROM Color")
-                    colors = c.fetchall()
-                    for color in colors:
-                        primary, foreground, gray = color[0], color[1], color[2]
+                    primary, foreground, gray = self.get_theme().as_tuple()
                     # Configure Colour
                     self.text_btn.configure(bg=primary)
                     self.doc_btn.configure(bg=gray)
@@ -508,12 +571,8 @@ class App:
                         w.destroy()
                     #=============Polarity and Depression functions===========
                     def polarity():
-                        self.master.title("Sentiment247  >  File  >  Polarity")
-                        # Get current colors
-                        c.execute("SELECT * FROM Color")
-                        colors = c.fetchall()
-                        for color in colors:
-                            primary, foreground, gray = color[0], color[1], color[2]
+                        self.master.title(f"{APP_NAME}  >  File  >  Polarity")
+                        primary, foreground, gray = self.get_theme().as_tuple()
                         self.btn_lbl.place(relx=0,rely=0.91)
                         self.pol_btn.configure(fg=foreground)
                         self.dep_btn.configure(fg=gray)
@@ -587,12 +646,8 @@ class App:
                     self.pol_btn.place(relx=0.02,rely=0.64,width=410)
         
                     def depression():
-                        self.master.title("Sentiment247  >  File  >  Depression")
-                        # Get current colors
-                        c.execute("SELECT * FROM Color")
-                        colors = c.fetchall()
-                        for color in colors:
-                            primary, foreground, gray = color[0], color[1], color[2]
+                        self.master.title(f"{APP_NAME}  >  File  >  Depression")
+                        primary, foreground, gray = self.get_theme().as_tuple()
                         self.btn_lbl.place(relx=0.51,rely=0.91)
                         self.pol_btn.configure(fg=gray)
                         self.dep_btn.configure(fg=foreground)
@@ -675,13 +730,9 @@ class App:
                 self.doc_btn.place(relx=0.1,rely=0.25,width=67,height=50)
                 tooltip.CreateToolTip(self.doc_btn,'Attach file')
                 def voice():
-                    self.master.title("Sentiment247  >  Voice Record")
+                    self.master.title(f"{APP_NAME}  >  Voice Record")
                     self.settings.place(relx=0.20,rely=0.93)
-                    # Get current colors
-                    c.execute("SELECT * FROM Color")
-                    colors = c.fetchall()
-                    for color in colors:
-                        primary, foreground, gray = color[0], color[1], color[2]
+                    primary, foreground, gray = self.get_theme().as_tuple()
                     # Configure Colour
                     self.text_btn.configure(bg=primary)
                     self.doc_btn.configure(bg=primary)
@@ -700,7 +751,7 @@ class App:
                         w.destroy()
                     #=============Polarity and Depression functions===========
                     def polarity():
-                        self.master.title("Sentiment247  >  Voice Record  >  Polarity")
+                        self.master.title(f"{APP_NAME}  >  Voice Record  >  Polarity")
                         self.btn_lbl.place(relx=0,rely=0.91)
                         self.pol_btn.configure(fg=foreground)
                         self.dep_btn.configure(fg=gray)
@@ -717,7 +768,7 @@ class App:
                     self.pol_btn.place(relx=0.02,rely=0.64,width=410)
         
                     def depression():
-                        self.master.title("Sentiment247  >  Voice Record  >  Depression")
+                        self.master.title(f"{APP_NAME}  >  Voice Record  >  Depression")
                         self.btn_lbl.place(relx=0.51,rely=0.91)
                         self.pol_btn.configure(fg=gray)
                         self.dep_btn.configure(fg=foreground)
@@ -735,13 +786,9 @@ class App:
                 self.voice_btn.place(relx=0.1,rely=0.34,width=67,height=50)
                 tooltip.CreateToolTip(self.voice_btn,'Voice record')
                 def link():
-                    self.master.title("Sentiment247  >  Social Media Post")
+                    self.master.title(f"{APP_NAME}  >  Social Media Post")
                     self.settings.place(relx=0.20,rely=0.93)
-                    # Get current colors
-                    c.execute("SELECT * FROM Color")
-                    colors = c.fetchall()
-                    for color in colors:
-                        primary, foreground, gray = color[0], color[1], color[2]
+                    primary, foreground, gray = self.get_theme().as_tuple()
                     # Configure Colour
                     self.text_btn.configure(bg=primary)
                     self.doc_btn.configure(bg=primary)
@@ -811,11 +858,7 @@ class App:
                     def polarity():
                         for w in self.main_frame.winfo_children():
                             w.destroy()
-                        # Get current colors
-                        c.execute("SELECT * FROM Color")
-                        colors = c.fetchall()
-                        for color in colors:
-                            primary, foreground, gray = color[0], color[1], color[2]
+                        primary, foreground, gray = self.get_theme().as_tuple()
                         self.btn_lbl.place(relx=0,rely=0.91)
                         self.pol_btn.configure(fg=foreground)
                         self.dep_btn.configure(fg=gray)
@@ -828,7 +871,7 @@ class App:
                             if is_connected(): # If there is internet connection
                                 load_lbl.unload()
                                 link_widgets()
-                                self.master.title("Sentiment247  >  Social Media Post  >  Polarity")
+                                self.master.title(f"{APP_NAME}  >  Social Media Post  >  Polarity")
                             else: 
                                 load_lbl.unload()
                                 self.lbl_404 = tk.PhotoImage(file='images/error-404.png')
@@ -842,11 +885,7 @@ class App:
                     self.pol_btn.place(relx=0.02,rely=0.64,width=410)
         
                     def depression():
-                        # Get current colors
-                        c.execute("SELECT * FROM Color")
-                        colors = c.fetchall()
-                        for color in colors:
-                            primary, foreground, gray = color[0], color[1], color[2]
+                        primary, foreground, gray = self.get_theme().as_tuple()
                         for w in self.main_frame.winfo_children():
                             w.destroy()
                         self.btn_lbl.place(relx=0.51,rely=0.91)
@@ -861,7 +900,7 @@ class App:
                             if is_connected(): # If there is internet connection
                                 load_lbl.unload()
                                 link_widgets()
-                                self.master.title("Sentiment247  >  Social Media Post  >  Depression")
+                                self.master.title(f"{APP_NAME}  >  Social Media Post  >  Depression")
                             else: 
                                 load_lbl.unload()
                                 self.lbl_404 = tk.PhotoImage(file='images/error-404.png')
@@ -886,13 +925,9 @@ class App:
                 tooltip.CreateToolTip(self.link_btn,'Social media post')                
                 
                 def settings():
-                    self.master.title("Sentiment247  >  Settings")
+                    self.master.title(f"{APP_NAME}  >  Settings")
                     self.settings.place_forget()
-                    # Get current colors
-                    c.execute("SELECT * FROM Color")
-                    colors = c.fetchall()
-                    for color in colors:
-                        primary, foreground, gray = color[0], color[1], color[2]
+                    primary, foreground, gray = self.get_theme().as_tuple()
                     # Configure Colour 
                     self.text_btn.configure(bg=primary)
                     self.doc_btn.configure(bg=primary)
@@ -948,64 +983,15 @@ class App:
                     
                     def dark():
                         if self.nav_frame['background'] == '#ffffff': # That means we are on light mode
-                            primary, foreground, gray = '#181818', '#ffffff', '#3d3d3d'
-                            # update database
-                            c.execute("UPDATE Color SET 'Primary' = '"+primary+"', 'Foreground' = '"+foreground+"', 'Gray' = '"+gray+"'")
-                            conn.commit()
-
-                            self.master.configure(bg=primary)
-                            self.nav_frame.configure(bg=primary)
-                            for widget in self.nav_frame.winfo_children():
-                                widget.configure(bg=primary,activebackground=primary)
-                                if str(widget).split('!')[-1] == 'label':
-                                    widget.configure(fg=gray)
-                            
-                            self.top_frame.configure(bg=primary)
-                            self.settings_lbl.configure(bg=primary,fg=foreground)
-
-                            self.main_frame.configure(bg=gray)
-                            for widget in self.main_frame.winfo_children():
-                                if str(widget).split('!')[-1][0] == 'l':
-                                    widget.configure(bg=gray,fg=foreground)
-                                if str(widget).split('!')[-1][0:5] == 'frame':
-                                    widget.configure(bg=primary)
-                                    for widget2 in widget.winfo_children():
-                                        if str(widget2).split('!')[-1][0] == 'l':
-                                            widget2.configure(bg=primary,fg=foreground)
-                                        else:
-                                            widget2.configure(bg=primary,fg=foreground,activebackground=primary,selectcolor=primary)
+                            theme = self.theme_store.set_mode('dark')
+                            self.apply_theme(theme)
                         else:
                             pass   
                     
                     def light():
                         if self.nav_frame['background'] == '#181818': # That means we are on light mode
-                            primary, foreground, gray = '#ffffff', '#222222', '#e0e0e0'
-                            
-                            # update database
-                            c.execute("UPDATE Color SET 'Primary' = '"+primary+"', 'Foreground' = '"+foreground+"', 'Gray' = '"+gray+"'")
-                            conn.commit()
-
-                            self.master.configure(bg=primary)
-                            self.nav_frame.configure(bg=primary)
-                            for widget in self.nav_frame.winfo_children():
-                                widget.configure(bg=primary,activebackground=primary)
-                                if str(widget).split('!')[-1] == 'label':
-                                    widget.configure(fg=gray)
-                            
-                            self.top_frame.configure(bg=primary)
-                            self.settings_lbl.configure(bg=primary,fg=foreground)
-
-                            self.main_frame.configure(bg=gray)
-                            for widget in self.main_frame.winfo_children():
-                                if str(widget).split('!')[-1][0] == 'l':
-                                    widget.configure(bg=gray,fg=foreground)
-                                if str(widget).split('!')[-1][0:5] == 'frame':
-                                    widget.configure(bg=primary)
-                                    for widget2 in widget.winfo_children():
-                                        if str(widget2).split('!')[-1][0] == 'l':
-                                            widget2.configure(bg=primary,fg=foreground)
-                                        else:
-                                            widget2.configure(bg=primary,fg=foreground,activebackground=primary,selectcolor=primary)
+                            theme = self.theme_store.set_mode('light')
+                            self.apply_theme(theme)
                         else:
                             pass 
                     
@@ -1025,13 +1011,7 @@ class App:
                 
                 text() # Run the text function on start
               
-            # Label for the loader gif
-            load_lbl = loading.ImageLabel(self.master,bg=primary)
-            load_lbl.place(relx=0.45,rely=0.40,width=70,height=70)
-            load_lbl.load('images/load.gif')
-            self.loading = tk.Label(self.master,text='Getting things ready...',fg=foreground,bg=primary,font=('normal',9))
-            self.loading.place(relx=0.425,rely=0.49)
-            self.master.after(3000, continue_) # Load for 1 second and call the continue function when done
+            self.show_loading(primary, foreground, continue_)
         # Home Page
         self.bg_img = tk.PhotoImage(file='images/bg.png')
         self.bg = tk.Label(self.master,image=self.bg_img,bg=primary)
@@ -1039,17 +1019,15 @@ class App:
         self.ill_img = tk.PhotoImage(file='images/home_illustration.png')
         self.illustration = tk.Label(self.master,image=self.ill_img,bg=primary)
         self.illustration.place(relx=0.35,rely=0.2)
-        self.sentiment_lbl = tk.Label(self.master,text='SENTIMENT',fg=foreground,bg=primary,font=('Constantia',35,'bold'))
+        self.sentiment_lbl = tk.Label(self.master,text=LANDING_TITLE,fg=foreground,bg=primary,font=('Constantia',35,'bold'))
         self.sentiment_lbl.place(relx=0.04,rely=0.25)
-        self.sentiment_lbl = tk.Label(self.master,text='247',fg='#ecb22e',bg=primary,font=('Constantia',35,'bold'))
-        self.sentiment_lbl.place(relx=0.35,rely=0.25)
-        self.sentiment_info = tk.Label(self.master,text='Our sentiment analysis tool allows you to',fg=foreground,bg=primary,font=('normal',13))
+        self.sentiment_info = tk.Label(self.master,text=LANDING_LINES[0],fg=foreground,bg=primary,font=('normal',13))
         self.sentiment_info.place(relx=0.04,rely=0.37)
-        self.sentiment_info2 = tk.Label(self.master,text='conviniently dectect the emotional tone',fg=foreground,bg=primary,font=('normal',13))
+        self.sentiment_info2 = tk.Label(self.master,text=LANDING_LINES[1],fg=foreground,bg=primary,font=('normal',13))
         self.sentiment_info2.place(relx=0.04,rely=0.405)
-        self.sentiment_info3 = tk.Label(self.master,text='behind text data by dictating polarity and',fg=foreground,bg=primary,font=('normal',13))
+        self.sentiment_info3 = tk.Label(self.master,text=LANDING_LINES[2],fg=foreground,bg=primary,font=('normal',13))
         self.sentiment_info3.place(relx=0.04,rely=0.437)
-        self.sentiment_info4 = tk.Label(self.master,text='determining depression.',fg=foreground,bg=primary,font=('mormal',13))
+        self.sentiment_info4 = tk.Label(self.master,text=LANDING_LINES[3],fg=foreground,bg=primary,font=('mormal',13))
         self.sentiment_info4.place(relx=0.04,rely=0.470)
         
         # Get Started Button
