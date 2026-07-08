@@ -747,19 +747,13 @@ class App:
         self.illustration = tk.Label(self.master,image=self.ill_img,bg=primary)
         self.illustration.place(relx=0.35,rely=0.2)
         self.sentiment_lbl = tk.Label(self.master,text=LANDING_TITLE,fg=foreground,bg=primary,font=('Constantia',35,'bold'))
-        self.sentiment_lbl.place(relx=0.04,rely=0.25)
-        self.sentiment_info = tk.Label(self.master,text=LANDING_LINES[0],fg=foreground,bg=primary,font=('normal',13))
-        self.sentiment_info.place(relx=0.04,rely=0.37)
-        self.sentiment_info2 = tk.Label(self.master,text=LANDING_LINES[1],fg=foreground,bg=primary,font=('normal',13))
-        self.sentiment_info2.place(relx=0.04,rely=0.405)
-        self.sentiment_info3 = tk.Label(self.master,text=LANDING_LINES[2],fg=foreground,bg=primary,font=('normal',13))
-        self.sentiment_info3.place(relx=0.04,rely=0.437)
-        self.sentiment_info4 = tk.Label(self.master,text=LANDING_LINES[3],fg=foreground,bg=primary,font=('normal',13))
-        self.sentiment_info4.place(relx=0.04,rely=0.470)
-        
+        self.sentiment_lbl.place(x=36,y=163)
+        self.sentiment_info = tk.Label(self.master,text='\n'.join(LANDING_LINES),fg=foreground,bg=primary,font=('Segoe UI',12),justify='left')
+        self.sentiment_info.place(x=36,y=232)
+
         # Get Started Button
-        self.getstarted = tk.Button(self.master,text='Get Started',font=('normal',9,'bold'),fg='#3f3d56',bg='#ecb22e',activebackground=primary,bd=0,command=getstarted)
-        self.getstarted.place(relx=0.04,rely=0.56,width=150,height=35)
+        self.getstarted = tk.Button(self.master,text='Get Started',font=('Segoe UI',10,'bold'),fg=ACCENT_TEXT,bg=ACCENT,activebackground=primary,bd=0,command=getstarted)
+        self.getstarted.place(x=36,y=364,width=150,height=38)
         self.getstarted.focus() # Focus on this button when the program starts
         hover.Hover(self.getstarted)
         self.getstarted.bind("<Return>",getstarted) # Bind the return(enter) key to the get started function"""
