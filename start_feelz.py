@@ -21,6 +21,7 @@ REQUIRED_MODULES = [
     "numpy",
     "pandas",
     "PIL",
+    "sklearn",
     "twython",
     "validators",
 ]

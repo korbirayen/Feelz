@@ -1,0 +1,23 @@
+[
+  {
+    "model": "Majority baseline",
+    "accuracy": 0.7755695588948134,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0
+  },
+  {
+    "model": "Hand-rolled TF-IDF NB",
+    "accuracy": 0.8565196316044595,
+    "precision": 0.8957345971563981,
+    "recall": 0.408207343412527,
+    "f1": 0.5608308605341247
+  },
+  {
+    "model": "TF-IDF + LogReg",
+    "accuracy": 0.9922443044110518,
+    "precision": 0.9912087912087912,
+    "recall": 0.9740820734341252,
+    "f1": 0.9825708061002179
+  }
+]

@@ -1,0 +1,3 @@
+# Extra dependencies for evaluate_depression_model.py only.
+# The app itself only needs scikit-learn (already in requirements.txt).
+matplotlib

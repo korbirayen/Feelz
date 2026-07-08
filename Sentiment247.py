@@ -14,7 +14,6 @@ import sqlite3
 import glob
 
 from Extensions import vision, DepressionScore, PolarityScore
-from Extensions.DepressionScore import TweetClassifier
 from Extensions.branding import APP_NAME, LANDING_LINES, LANDING_TITLE
 from Extensions.theme_store import ThemeStore
 import pickle
@@ -219,10 +218,9 @@ class App:
                         else:
                             for w in self.main_frame.winfo_children():
                                 w.place_forget()
-                            
-                            processed = DepressionScore.process_message(content)
-                            depressive_scorer(processed)    
-                                                       
+
+                            depressive_scorer(content)
+
                     # Submit Button
                     self.submit = tk.Button(self.main_frame,text='Submit',bg='#ecb22e',fg=primary,font=('normal',8,'bold'),bd=0,command=submit)
                     self.submit.place(relx=0.682,rely=0.45,width=100,height=30)
@@ -306,13 +304,13 @@ class App:
                         for w in self.neu_frame.winfo_children(): # Neutral Frame
                             w.configure(state=tk.DISABLED)
                 
-                def depressive_scorer(processed_text):
+                def depressive_scorer(text):
                     """This Function is will assign depression model and scores to
                     respective labels and configuring size of frames when scores are calculated"""
                     try:
-                        result = DepressionScore.RunModel(processed_text)
+                        result = DepressionScore.predict_depressive(text)
                     except Exception as error:
-                        messagebox.showerror("Depression checker error", f"The depression model could not be loaded:\n{error}")
+                        messagebox.showerror("Language pattern checker error", f"The model could not be loaded:\n{error}")
                         return
 
                     def ensure_result_card():
@@ -320,7 +318,7 @@ class App:
                             self.result_card = tk.Frame(self.main_frame, bg=primary, relief='groove', bd=1)
                             self.result_title = tk.Label(self.result_card, text='Ready to analyze', font=('Segoe UI', 11, 'bold'), fg=foreground, bg=primary)
                             self.result_title.place(relx=0.03, rely=0.16)
-                            self.result_detail = tk.Label(self.result_card, text='The checker will highlight the result and keep the interface clear.', font=('Segoe UI', 9), fg=foreground, bg=primary)
+                            self.result_detail = tk.Label(self.result_card, text='Flags word choices statistically associated with depressive language. Not a diagnosis.', font=('Segoe UI', 9), fg=foreground, bg=primary)
                             self.result_detail.place(relx=0.03, rely=0.56)
 
                     # Enable Frames
@@ -393,7 +391,7 @@ class App:
                         self.result_card.place(relx=0.17,rely=0.50,width=520,height=56)
                         self.result_title = tk.Label(self.result_card,text='Ready to analyze',font=('Segoe UI',11,'bold'),fg=foreground,bg=primary)
                         self.result_title.place(relx=0.03,rely=0.10)
-                        self.result_detail = tk.Label(self.result_card,text='The checker will highlight the result and keep the interface clear.',font=('Segoe UI',8),fg=foreground,bg=primary)
+                        self.result_detail = tk.Label(self.result_card,text='Flags word choices statistically associated with depressive language. Not a diagnosis.',font=('Segoe UI',8),fg=foreground,bg=primary)
                         self.result_detail.place(relx=0.03,rely=0.48)
         
                         def submit():
@@ -481,9 +479,8 @@ class App:
                             else:
                                 for w in self.main_frame.winfo_children():
                                     w.place_forget()
-                                
-                                processed = DepressionScore.process_message(content)
-                                depressive_scorer(processed)                               
+
+                                depressive_scorer(content)
                         # Submit Button
                         self.submit = tk.Button(self.main_frame,text='Submit',bg='#ecb22e',fg=primary,font=('Segoe UI',9,'bold'),bd=0,activebackground='#d7a51e',command=submit)
                         self.submit.place(relx=0.682,rely=0.44,width=100,height=32)
@@ -536,7 +533,7 @@ class App:
                         for w in self.dep_frame.winfo_children(): # Depressive Frame
                             w.configure(state=tk.DISABLED) 
                     # Detect Polarity Button
-                    self.dep_btn = tk.Button(self.top_frame,text='Detect Depression',font=('Arial',9,'bold'),bg=primary,activebackground=primary,fg=gray,bd=0,command=depression)
+                    self.dep_btn = tk.Button(self.top_frame,text='Language Patterns',font=('Arial',9,'bold'),bg=primary,activebackground=primary,fg=gray,bd=0,command=depression)
                     self.dep_btn.place(relx=0.5,rely=0.64,width=410)
         
                     self.btn = tk.PhotoImage(file='images/btn_img.png')
@@ -715,7 +712,7 @@ class App:
                             fg=foreground,bg='#ecb22e',activebackground=gray,bd=0,command=openfile)
                         self.attach_btn.place(relx=0.41,rely=0.40,width=160,height=35)
                         hover.Hover(self.attach_btn)
-                    self.dep_btn = tk.Button(self.top_frame,text='Detect Depression',font=('arial',9,'bold'),\
+                    self.dep_btn = tk.Button(self.top_frame,text='Language Patterns',font=('arial',9,'bold'),\
                         bg=primary,activebackground=primary,fg=gray,bd=0,command=depression)
                     self.dep_btn.place(relx=0.5,rely=0.64,width=410)
         
@@ -772,7 +769,7 @@ class App:
                         self.btn_lbl.place(relx=0.51,rely=0.91)
                         self.pol_btn.configure(fg=gray)
                         self.dep_btn.configure(fg=foreground)
-                    self.dep_btn = tk.Button(self.top_frame,text='Detect Depression',font=('arial',9,'bold'),bg=primary,activebackground=primary,fg=gray,bd=0,command=depression)
+                    self.dep_btn = tk.Button(self.top_frame,text='Language Patterns',font=('arial',9,'bold'),bg=primary,activebackground=primary,fg=gray,bd=0,command=depression)
                     self.dep_btn.place(relx=0.5,rely=0.64,width=410)
         
                     self.btn = tk.PhotoImage(file='images/btn_img.png')
@@ -910,7 +907,7 @@ class App:
                             load_lbl.load('images/load.gif')
                         threading.Thread(target=check_connection).start()
                         threading.Thread(target=load).start() 
-                    self.dep_btn = tk.Button(self.top_frame,text='Detect Depression',font=('arial',9,'bold'),bg=primary,activebackground=primary,fg=gray,bd=0,command=depression)
+                    self.dep_btn = tk.Button(self.top_frame,text='Language Patterns',font=('arial',9,'bold'),bg=primary,activebackground=primary,fg=gray,bd=0,command=depression)
                     self.dep_btn.place(relx=0.5,rely=0.64,width=410)
         
                     self.btn = tk.PhotoImage(file='images/btn_img.png')

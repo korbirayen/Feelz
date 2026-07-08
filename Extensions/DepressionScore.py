@@ -19,6 +19,7 @@ import types
 import pickle
 
 MODEL_PATH = Path(__file__).resolve().parent / "Models" / "classifier.pickle"
+PIPELINE_PATH = Path(__file__).resolve().parent / "Models" / "depression_pipeline.pickle"
 
 def process_message(message, lower_case = True, stem = True, stop_words = True, gram = 2):
     if lower_case:
@@ -155,6 +156,13 @@ def _ensure_pickle_compatibility():
         sys.modules["pandas.core.indexes.numeric"] = numeric_module
 
 def RunModel(processed_text):
+    """Classify with the original hand-rolled TF-IDF/Naive Bayes model (V1).
+
+    Kept for reference and for evaluate_depression_model.py, which measures it
+    against the shipped classifier below. See Depression Model/results/metrics.md:
+    V1 barely beats a majority-class guess (85.7% accuracy, 0.41 recall on held-out
+    data) because it misses most actually-depressive text.
+    """
     _ensure_pickle_compatibility()
     with MODEL_PATH.open('rb') as model_file:
         model = pickle.load(model_file)
@@ -162,8 +170,52 @@ def RunModel(processed_text):
     return result
 
 
+def tokenize_unigrams(message):
+    """Tokenizer for the V2 pipeline: unigrams with stopword removal and stemming.
+
+    process_message defaults to gram=2, which returns raw bigrams and skips the
+    stopword/stemming steps entirely (see the early `if gram > 1: return w`
+    above) - that's the behavior V1 was trained and shipped with. Forcing
+    gram=1 here restores the preprocessing V1 was documented as doing but never
+    actually applied.
+    """
+    return process_message(message, gram=1)
+
+
+def build_pipeline():
+    """Construct the V2 model: TF-IDF unigrams + Logistic Regression.
+
+    class_weight='balanced' matters here - the dataset is ~78% non-depressive,
+    so an unweighted model can coast on the majority class the way V1 does.
+    """
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import Pipeline
+
+    return Pipeline([
+        ("tfidf", TfidfVectorizer(tokenizer=tokenize_unigrams, token_pattern=None)),
+        ("clf", LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)),
+    ])
+
+
+_pipeline_cache = None
+
+
+def predict_depressive(text):
+    """Classify raw text with the V2 pipeline (99.2% accuracy, 0.97 recall on
+    held-out data - see Depression Model/results/metrics.md). This is the model
+    the app uses; RunModel/TweetClassifier above is kept only as the baseline
+    V2 is measured against.
+    """
+    global _pipeline_cache
+    if _pipeline_cache is None:
+        with PIPELINE_PATH.open('rb') as f:
+            _pipeline_cache = pickle.load(f)
+    return bool(_pipeline_cache.predict([text])[0])
+
+
 #cwd = os.getcwd()  # Get the current working directory (cwd)
 #files = os.listdir(cwd)  # Get all the files in that directory
-#print("Files in %r: %s" % (cwd, files)) 
+#print("Files in %r: %s" % (cwd, files))
 
 #print(RunModel(process_message("Extreme depression, lack of energy, hopelessness")))
