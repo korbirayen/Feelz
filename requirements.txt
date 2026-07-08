@@ -5,6 +5,8 @@ pandas
 Pillow
 google-cloud-vision
 protobuf<7
+requests
 scikit-learn
-twython
+sounddevice
+SpeechRecognition
 validators

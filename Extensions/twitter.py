@@ -1,58 +1,45 @@
-import os
+import html
+import re
 
-from twython import Twython
 import emoji
+import requests
+
+OEMBED_URL = "https://publish.twitter.com/oembed"
 
 
-def _build_client():
-    consumer_key = os.getenv("TWITTER_CONSUMER_KEY")
-    consumer_secret = os.getenv("TWITTER_CONSUMER_SECRET")
-    access_token = os.getenv("TWITTER_ACCESS_TOKEN")
-    access_token_secret = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
-
-    if not all([consumer_key, consumer_secret, access_token, access_token_secret]):
-        raise RuntimeError(
-            "Set TWITTER_CONSUMER_KEY, TWITTER_CONSUMER_SECRET, TWITTER_ACCESS_TOKEN, and TWITTER_ACCESS_TOKEN_SECRET before using Twitter lookups."
-        )
-
-    return Twython(
-        consumer_key,
-        consumer_secret,
-        access_token,
-        access_token_secret,
-    )
+class TweetFetchError(RuntimeError):
+    """Raised when a post's text can't be fetched via the public oEmbed API."""
 
 
-def _count_emojis(text):
-    if hasattr(emoji, "emoji_list"):
-        return len(emoji.emoji_list(text))
-
-    unicode_emoji = getattr(emoji, "UNICODE_EMOJI", {})
-    return sum(text.count(symbol) for symbol in unicode_emoji)
-
-
-def _remove_emojis(text):
+def _strip_emojis(text):
     if hasattr(emoji, "replace_emoji"):
         return emoji.replace_emoji(text, replace="")
 
     get_emoji_regexp = getattr(emoji, "get_emoji_regexp", None)
     if get_emoji_regexp:
-        return get_emoji_regexp().sub(u"", text)
+        return get_emoji_regexp().sub("", text)
 
     return text
 
-def get_text(url):
-    #url = 'https://twitter.com/VictorIsrael_/status/1348272317663731713?s=20'
-    i_d = url.split('/')[-1] # Return the last string after '/'
-    num = i_d.split('?')[0] # Return the ID before '?' 
-    # The show status function from twython accepts the tweet ID
-    t = _build_client()
-    tweet = t.show_status(id=int(num),tweet_mode='extended')
-    text = tweet['full_text']
 
-    emoji_count = _count_emojis(text)
-    
-    if emoji_count == 0: # If there is no emoji
-        return (text) # Return the text from status
-    else:
-        return _remove_emojis(text) # Return the text without emojis
+def get_text(url):
+    """Fetch a tweet/post's text via X/Twitter's public oEmbed endpoint.
+
+    No API keys, developer account, or login required - this is the same
+    unauthenticated endpoint browsers use to render embedded tweets, so it
+    works for any public post's URL.
+    """
+    try:
+        response = requests.get(OEMBED_URL, params={"url": url}, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as error:
+        raise TweetFetchError(f"Could not reach X/Twitter: {error}")
+
+    html_fragment = response.json().get("html", "")
+    match = re.search(r"<p[^>]*>(.*?)</p>", html_fragment, re.DOTALL)
+    if not match:
+        raise TweetFetchError("This post could not be read (it may be private, deleted, or age-restricted).")
+
+    text = re.sub(r"<[^>]+>", " ", match.group(1))
+    text = html.unescape(text).strip()
+    return _strip_emojis(text)

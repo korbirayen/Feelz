@@ -21,8 +21,10 @@ REQUIRED_MODULES = [
     "numpy",
     "pandas",
     "PIL",
+    "requests",
     "sklearn",
-    "twython",
+    "sounddevice",
+    "speech_recognition",
     "validators",
 ]
 

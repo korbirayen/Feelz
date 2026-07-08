@@ -2,14 +2,15 @@
 
 Feelz is a small desktop mood checker that I refactored from the original Sentiment247 project. It still does the same core jobs, but the branding, launch flow, and a few of the internals have been cleaned up so it feels like a new app instead of a renamed copy.
 
-It can check typed text, read text files, pull text from images, and inspect social links when the external services are set up.
+It can check typed text, read text files, pull text from images, record and transcribe speech from your microphone, and read public X (Twitter) post URLs - all through the same sentiment/depression-language models.
 
 ## What You Need
 
-The app runs best with these extras in place:
+Everything works out of the box except image OCR:
 
-- Set `TWITTER_CONSUMER_KEY`, `TWITTER_CONSUMER_SECRET`, `TWITTER_ACCESS_TOKEN`, and `TWITTER_ACCESS_TOKEN_SECRET` for Twitter lookups.
 - Set `GOOGLE_APPLICATION_CREDENTIALS` to your Google Vision service account JSON path if you want OCR to use your own project credentials.
+- Social post lookups use X/Twitter's public oEmbed endpoint, so no developer account or API keys are needed - just a public post URL.
+- Voice input uses your default microphone and the free Google Web Speech API for transcription (no account needed, but it does need an internet connection).
 
 If you want to make the app fully yours, replace the images in `images/` and swap out the legacy model files when you are ready.
 
