@@ -1,0 +1,39 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = ["Depression Model", ".venv", "build", "dist"]
+
+[tool.ruff.lint]
+# Legacy Tkinter/ML code (Sentiment247.py, Extensions/DepressionScore.py's
+# TweetClassifier) predates this config and is deeply nested/closure-heavy;
+# holding it to the full default rule set would be a large unrelated
+# rewrite, so this starts from a conservative, high-signal subset.
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",  # line length - handled loosely via line-length above, not a hard fail
+]
+
+[tool.ruff.lint.per-file-ignores]
+"Sentiment247.py" = ["E402", "F841"]
+# Needs sys.path patched (repo root) before importing Extensions.
+"demo/streamlit_app.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+explicit_package_bases = true
+mypy_path = "."
+exclude = ["Depression Model", "build", "dist", ".venv", "tests"]
+
+# The Tkinter desktop app and the original hand-rolled classifier are
+# untyped legacy code (see MODEL_CARD.md for why TweetClassifier is kept at
+# all); typing them fully is a separate, much larger effort than the new
+# modules below, which are typed from the start.
+[[tool.mypy.overrides]]
+module = ["Sentiment247", "Extensions.DepressionScore", "Extensions.PolarityScore", "Extensions.hover", "Extensions.loading", "Extensions.tooltip"]
+ignore_errors = true

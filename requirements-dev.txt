@@ -1,0 +1,6 @@
+# Tooling for running the test suite, linter, and type checker - not needed
+# to run the app itself (see requirements.txt) or the evaluation script
+# (see requirements-eval.txt).
+pytest
+ruff
+mypy
