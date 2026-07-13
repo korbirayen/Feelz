@@ -1,0 +1,10 @@
+# Extra dependencies for the Streamlit web demo (demo/streamlit_app.py) only -
+# the desktop app (requirements.txt) never needs these.
+streamlit
+
+# Optional: powers the multi-emotion breakdown (Extensions/emotion_model.py).
+# Heavy (~1-2 GB with CUDA-less CPU wheels) and downloads a ~300MB model on
+# first use, which is exactly why it's kept out of requirements.txt - the
+# demo runs fine without it, just without the "Emotions" section.
+transformers
+torch
