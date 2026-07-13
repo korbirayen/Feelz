@@ -1,25 +1,22 @@
 # for text manipulation
-import nltk
-import re
 
 # importing different libraries for text processing
-from nltk.tokenize import word_tokenize
-from nltk.corpus import stopwords
-from nltk.stem import PorterStemmer
-
-# for data manipulation
-from math import log, sqrt
-import pandas as pd
-import numpy as np
-
-import os, sys
-from pathlib import Path
+import pickle
+import sys
 import types
 
-import pickle
+# for data manipulation
+from math import log
 
-MODEL_PATH = Path(__file__).resolve().parent / "Models" / "classifier.pickle"
-PIPELINE_PATH = Path(__file__).resolve().parent / "Models" / "depression_pipeline.pickle"
+import pandas as pd
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from nltk.tokenize import word_tokenize
+
+from Extensions.runtime_paths import bundled_root
+
+MODEL_PATH = bundled_root() / "Extensions" / "Models" / "classifier.pickle"
+PIPELINE_PATH = bundled_root() / "Extensions" / "Models" / "depression_pipeline.pickle"
 
 def process_message(message, lower_case = True, stem = True, stop_words = True, gram = 2):
     if lower_case:
@@ -36,7 +33,7 @@ def process_message(message, lower_case = True, stem = True, stop_words = True, 
         words = [word for word in words if word not in sw]
     if stem:
         stemmer = PorterStemmer()
-        words = [stemmer.stem(word) for word in words]   
+        words = [stemmer.stem(word) for word in words]
     return words
 
 class TweetClassifier(object):
@@ -60,7 +57,7 @@ class TweetClassifier(object):
         for word in self.tf_positive:
             self.prob_positive[word] = (self.tf_positive[word] + 1) / (self.positive_words + \
                                                                 len(list(self.tf_positive.keys())))
-        self.prob_depressive_tweet, self.prob_positive_tweet = self.depressive_tweets / self.total_tweets, self.positive_tweets / self.total_tweets 
+        self.prob_depressive_tweet, self.prob_positive_tweet = self.depressive_tweets / self.total_tweets, self.positive_tweets / self.total_tweets
 
 
     def calc_TF_and_IDF(self):
@@ -103,20 +100,20 @@ class TweetClassifier(object):
             self.sum_tf_idf_depressive += self.prob_depressive[word]
         for word in self.tf_depressive:
             self.prob_depressive[word] = (self.prob_depressive[word] + 1) / (self.sum_tf_idf_depressive + len(list(self.prob_depressive.keys())))
-            
+
         for word in self.tf_positive:
             self.prob_positive[word] = (self.tf_positive[word]) * log((self.depressive_tweets + self.positive_tweets) \
                                                           / (self.idf_depressive.get(word, 0) + self.idf_positive[word]))
             self.sum_tf_idf_positive += self.prob_positive[word]
         for word in self.tf_positive:
             self.prob_positive[word] = (self.prob_positive[word] + 1) / (self.sum_tf_idf_positive + len(list(self.prob_positive.keys())))
-            
-    
-        self.prob_depressive_tweet, self.prob_positive_tweet = self.depressive_tweets / self.total_tweets, self.positive_tweets / self.total_tweets 
-                    
+
+
+        self.prob_depressive_tweet, self.prob_positive_tweet = self.depressive_tweets / self.total_tweets, self.positive_tweets / self.total_tweets
+
     def classify(self, processed_message):
         pDepressive, pPositive = 0, 0
-        for word in processed_message:                
+        for word in processed_message:
             if word in self.prob_depressive:
                 pDepressive += log(self.prob_depressive[word])
             else:
@@ -128,13 +125,13 @@ class TweetClassifier(object):
                 pPositive += log(self.prob_positive[word])
             else:
                 if self.method == 'tf-idf':
-                    pPositive -= log(self.sum_tf_idf_positive + len(list(self.prob_positive.keys()))) 
+                    pPositive -= log(self.sum_tf_idf_positive + len(list(self.prob_positive.keys())))
                 else:
                     pPositive -= log(self.positive_words + len(list(self.prob_positive.keys())))
             pDepressive += log(self.prob_depressive_tweet)
             pPositive += log(self.prob_positive_tweet)
         return pDepressive >= pPositive
-    
+
     def predict(self, testData):
         result = dict()
         for (i, message) in enumerate(testData):
@@ -201,17 +198,38 @@ def build_pipeline():
 _pipeline_cache = None
 
 
+def _load_pipeline():
+    global _pipeline_cache
+    if _pipeline_cache is None:
+        with PIPELINE_PATH.open('rb') as f:
+            _pipeline_cache = pickle.load(f)
+    return _pipeline_cache
+
+
 def predict_depressive(text):
     """Classify raw text with the V2 pipeline (99.2% accuracy, 0.97 recall on
     held-out data - see Depression Model/results/metrics.md). This is the model
     the app uses; RunModel/TweetClassifier above is kept only as the baseline
     V2 is measured against.
     """
-    global _pipeline_cache
-    if _pipeline_cache is None:
-        with PIPELINE_PATH.open('rb') as f:
-            _pipeline_cache = pickle.load(f)
-    return bool(_pipeline_cache.predict([text])[0])
+    return bool(_load_pipeline().predict([text])[0])
+
+
+def predict_depressive_with_confidence(text):
+    """Like predict_depressive, but also returns the model's confidence (0-1)
+    in whichever label it picked, via LogisticRegression.predict_proba.
+
+    Returns (is_depressive, confidence). confidence is the predicted
+    probability of the *predicted* class, not always the "depressive"
+    class - e.g. a confident non-depressive call returns a high number too.
+    """
+    pipeline = _load_pipeline()
+    proba = pipeline.predict_proba([text])[0]
+    classes = list(pipeline.classes_)
+    depressive_proba = float(proba[classes.index(1)])
+    is_depressive = depressive_proba >= 0.5
+    confidence = depressive_proba if is_depressive else 1.0 - depressive_proba
+    return is_depressive, confidence
 
 
 #cwd = os.getcwd()  # Get the current working directory (cwd)

@@ -17,6 +17,7 @@ NLTK_RESOURCES = {
 }
 REQUIRED_MODULES = [
     "emoji",
+    "matplotlib",
     "nltk",
     "numpy",
     "pandas",

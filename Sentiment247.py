@@ -1,24 +1,38 @@
 import tkinter as tk
-from tkinter import ttk
-from tkinter import filedialog
-from tkinter import messagebox
+from tkinter import filedialog, messagebox, ttk
+
+import matplotlib
 from PIL import Image, ImageTk
 
-from Extensions import loading, tooltip, hover
-import threading
-
-from Extensions import twitter
-import validators
-import socket
-
+matplotlib.use('TkAgg')
+import os
 import sqlite3
-import glob
+import threading
 from pathlib import Path
 
-from Extensions import vision, voice, DepressionScore, PolarityScore
-from Extensions.branding import APP_NAME, LANDING_LINES, LANDING_TITLE
-from Extensions.theme_store import ThemeStore
-import pickle
+import validators
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+
+from Extensions.runtime_paths import app_root, bundled_root, ensure_nltk_data_path
+
+# Must run before importing anything that touches nltk.corpus/nltk.sentiment
+# below (PolarityScore loads its lexicon at import time) - see
+# Extensions/runtime_paths.py for why.
+ensure_nltk_data_path()
+
+from Extensions import (  # noqa: E402
+    analysis_service,
+    history_store,
+    hover,
+    loading,
+    twitter,
+    vision,
+    voice,
+)
+from Extensions.analysis_service import is_connected  # noqa: E402
+from Extensions.branding import APP_NAME, LANDING_LINES, LANDING_TITLE  # noqa: E402
+from Extensions.theme_store import ThemeStore  # noqa: E402
 
 # --- Design constants ---------------------------------------------------
 # One accent color, semantic colors for results, and a fixed layout grid
@@ -27,9 +41,17 @@ import pickle
 ACCENT = '#ecb22e'
 ACCENT_HOVER = '#d7a51e'
 ACCENT_TEXT = '#2b2110'   # dark text on top of the accent color, readable in both themes
-POSITIVE = '#1f9d55'
-NEUTRAL = '#d9a441'
-NEGATIVE = '#d1453b'
+# Semantic result colors, each tuned to be the best achievable single shade
+# against *both* theme backgrounds (#181818 dark / #ffffff light) at once -
+# the original shades read fine on dark but dropped as low as 2.25:1 against
+# white (WCAG AA needs 4.5:1 for normal text, 3:1 for large/bold text).
+# These get every combination to ~4.2:1 - comfortably past the large-text
+# threshold and close to full AA on both backgrounds simultaneously, which
+# a single hue-preserving color can't quite clear against pure black *and*
+# pure white at the same time.
+POSITIVE = '#1c8d4c'
+NEUTRAL = '#a27420'
+NEGATIVE = '#d34f45'
 
 RAIL_W = 190      # left nav rail width
 HEADER_H = 92     # top bar height (page title + segmented control)
@@ -41,9 +63,19 @@ CONTENT_H = 650 - CONTENT_Y - 10
 PAD = 45                       # left/right margin inside the content area
 FIELD_W = CONTENT_W - 2 * PAD  # width shared by inputs and result cards
 
-# Nav rail rows: 4 input modes stacked at the top, Settings pinned near the bottom
-NAV_ORDER = ['text', 'doc', 'voice', 'link', 'settings']
-NAV_ITEM_Y = [84, 134, 184, 234, 590]
+# Every image file the app actually loads - checked at startup so a missing
+# asset fails with a clear name instead of a random ImageTk crash mid-click.
+REQUIRED_IMAGES = [
+    'bg.png', 'batch.png', 'dark.png', 'doc_img.png', 'document.png', 'error-404.png',
+    'happy.png', 'history.png', 'home_illustration.png', 'image.png', 'light.png',
+    'link_img.png', 'load.gif', 'logo_img.ico', 'logo_img.png', 'neutral.png',
+    'notification.png', 'sad.png', 'settings.png', 'text_img.png', 'theme.png',
+    'twitter.png', 'voice_img.png',
+]
+
+# Nav rail rows: input modes + History/Batch stacked at the top, Settings pinned near the bottom
+NAV_ORDER = ['text', 'doc', 'voice', 'link', 'history', 'batch', 'settings']
+NAV_ITEM_Y = [84, 134, 184, 234, 284, 334, 590]
 NAV_ITEM_H = 44
 
 # Vertical rhythm shared by every input mode: input area, then Submit, then
@@ -57,15 +89,19 @@ CARD_Y = 240
 CARD_H = CONTENT_H - CARD_Y - 24
 
 
-def is_connected():
-    """check for an active internet connection"""
-    try:
-        # connects to the host and tells us if the host is actually reachable
-        socket.create_connection(("1.1.1.1", 53))
-        return True
-    except OSError:
-        pass
-    return False
+def muted_nav_fg(foreground, primary):
+    """Inactive nav-row text color: `gray` (the theme's divider/track shade)
+    reads at ~1.3:1-1.6:1 against `primary` as text - basically invisible,
+    especially in the light theme. Blending foreground 35% toward primary
+    keeps the "muted, not the active row" look while clearing WCAG AA
+    (~5:1 light theme, ~8:1 dark theme) against the nav rail background."""
+    fg = foreground.lstrip('#')
+    bg = primary.lstrip('#')
+    t = 0.35
+    return '#{:02x}{:02x}{:02x}'.format(*(
+        round(int(fg[i:i + 2], 16) * (1 - t) + int(bg[i:i + 2], 16) * t)
+        for i in (0, 2, 4)
+    ))
 
 
 #=========================Main Window=============================
@@ -103,7 +139,7 @@ class App:
         icon = ImageTk.PhotoImage(Image.open(icon_path).resize((22, 22)))
         btn = tk.Button(self.nav_frame, image=icon, text='  ' + label, compound='left',
                          font=('Segoe UI', 10), bd=0, anchor='w', padx=14,
-                         bg=primary, fg=gray, activebackground=gray, activeforeground=foreground,
+                         bg=primary, fg=muted_nav_fg(foreground, primary), activebackground=gray, activeforeground=foreground,
                          command=command)
         btn.image = icon  # keep a reference alive - Tkinter drops GC'd PhotoImages
         btn.place(x=0, y=NAV_ITEM_Y[index], width=RAIL_W, height=NAV_ITEM_H)
@@ -148,15 +184,46 @@ class App:
         self.result_title.place(x=24, y=20)
         self.result_detail = tk.Label(self.result_card, text=ready_detail, font=('Segoe UI', 10), fg=foreground, bg=primary, wraplength=width - 48, justify='left')
         self.result_detail.place(x=24, y=detail_y)
+
+        # Hidden unless render_depression_result() decides a high-confidence
+        # depressive result warrants surfacing crisis-line resources.
+        # bg matches the card (not `gray`) and text uses `foreground` rather
+        # than a semantic color, so legibility doesn't depend on NEGATIVE's
+        # contrast against an arbitrary background - the color accent bar
+        # alone carries the "this is flagged" signal.
+        self._crisis_frame = tk.Frame(self.result_card, bg=primary)
+        self._crisis_accent = tk.Frame(self._crisis_frame, bg=NEGATIVE)
+        self._crisis_accent.place(x=0, y=0, width=4, relheight=1)
+        self._crisis_label = tk.Label(
+            self._crisis_frame,
+            text=("If this feels urgent, you don't have to handle it alone  ·  "
+                  "988 - call or text  ·  Crisis Text Line - text HOME to 741741  ·  "
+                  "findahelpline.com"),
+            font=('Segoe UI', 9, 'bold'), fg=foreground, bg=primary,
+            wraplength=width - 80, justify='left',
+        )
+        self._crisis_label.place(x=16, y=10)
+        self._crisis_frame_geom = dict(x=24, y=height - 74, width=width - 48, height=58)
         return self.result_card
 
-    def render_depression_result(self, is_depressive):
-        if is_depressive:
+    def show_crisis_resources(self, show):
+        if show:
+            self._crisis_frame.place(**self._crisis_frame_geom)
+        else:
+            self._crisis_frame.place_forget()
+
+    def render_depression_result(self, result):
+        """result: an Extensions.analysis_service.DepressionResult."""
+        confidence_pct = round(result.confidence * 100)
+        note = f" ({confidence_pct}% confidence"
+        note += ", low - take this one with a grain of salt)" if result.low_confidence else ")"
+        if result.is_depressive:
             self.result_title.configure(text='Result: depressive tone detected', fg=NEGATIVE)
-            self.result_detail.configure(text="The model leaned toward the depressive class for this input - a word-pattern signal, not a diagnosis.")
+            self.result_detail.configure(text="The model leaned toward the depressive class for this input - a word-pattern signal, not a diagnosis." + note)
         else:
             self.result_title.configure(text='Result: no strong depressive tone detected', fg=POSITIVE)
-            self.result_detail.configure(text='The model leaned toward the non-depressive class for this input.')
+            self.result_detail.configure(text='The model leaned toward the non-depressive class for this input.' + note)
+        self.show_crisis_resources(result.show_crisis_resources)
 
     def build_polarity_card(self, parent, x=PAD, y=CARD_Y, width=FIELD_W, height=CARD_H):
         """Modern replacement for the old three separate positive/neutral/negative
@@ -335,19 +402,19 @@ class App:
         self.loading.place(relx=0.425, rely=0.49)
         self.master.after(delay, callback)
 
-    def __init__(self, master): 
+    def __init__(self, master):
         self.theme_store = ThemeStore(conn)
         theme = self.get_theme()
         primary, foreground, gray = theme.as_tuple()
-        
+
         w = 900 # window width
         h = 650 # window height
 
         ws = root.winfo_screenwidth() # width of the screen
-        hs = root.winfo_screenheight() # height of the screen    
+        hs = root.winfo_screenheight() # height of the screen
 
         x = (ws/2) - (w/2)
-        y = (hs/2) - (h/2) 
+        y = (hs/2) - (h/2)
 
         master.iconbitmap("images/logo_img.ico")
         self.master = master
@@ -396,7 +463,7 @@ class App:
                         if btn is None:
                             continue
                         active = item_key == key
-                        btn.configure(bg=gray if active else primary, fg=foreground if active else gray)
+                        btn.configure(bg=gray if active else primary, fg=foreground if active else muted_nav_fg(foreground, primary))
                         if active:
                             self.nav_indicator.place_configure(y=NAV_ITEM_Y[i])
                     self.nav_indicator.configure(bg=ACCENT)
@@ -440,23 +507,20 @@ class App:
 
                 def polarity_scorer(content):
                     """Run VADER on content and update the shared polarity result card."""
-                    result = PolarityScore.sentiment(content) # A dictionary of sentiment scores
-                    scores = {
-                        'negative': int(result['neg'] * 100),
-                        'neutral': int(result['neu'] * 100),
-                        'positive': int(result['pos'] * 100),
-                    }
+                    scores = analysis_service.score_polarity(content)
                     self.render_polarity_result(scores)
-                
+                    history_store.log_entry(mode="polarity", text=content, result=max(scores, key=scores.get), confidence=scores[max(scores, key=scores.get)] / 100)
+
                 def depressive_scorer(text):
                     """Run the depression-language model on text and update the result card."""
                     try:
-                        result = DepressionScore.predict_depressive(text)
+                        result = analysis_service.score_depression(text)
                     except Exception as error:
                         messagebox.showerror("Language pattern checker error", f"The model could not be loaded:\n{error}")
                         return
                     self.render_depression_result(result)
-                                       
+                    history_store.log_entry(mode="depression", text=text, result="depressive" if result.is_depressive else "not depressive", confidence=result.confidence)
+
                 def text():
                     self.master.title(f"{APP_NAME}  >  Text")
                     self.set_active_nav('text')
@@ -664,6 +728,185 @@ class App:
                 # Social media link Button
                 self.build_nav_item('link', 3, 'images/link_img.png', 'Social Post', link)
 
+                def history():
+                    self.master.title(f"{APP_NAME}  >  History")
+                    self.set_active_nav('history')
+                    primary, foreground, gray = self.get_theme().as_tuple()
+                    for w in self.main_frame.winfo_children():
+                        w.destroy()
+                    for w in self.top_frame.winfo_children():
+                        w.destroy()
+
+                    tk.Label(self.top_frame, text='History', font=('Segoe UI', 16, 'bold'), bg=primary, fg=foreground).place(x=0, y=10)
+
+                    # ---- Trend chart: every local analysis mapped onto one
+                    # -1 (concerning) .. +1 (positive) axis, see history_store._signal ----
+                    chart_h = 220
+                    chart_frame = tk.Frame(self.main_frame, bg=primary, relief='groove', bd=1)
+                    chart_frame.place(x=PAD, y=INPUT_Y, width=FIELD_W, height=chart_h)
+
+                    trend = history_store.get_trend()
+                    if len(trend) < 2:
+                        tk.Label(chart_frame, text='Analyze a few entries to start seeing your trend here.',
+                                 font=('Segoe UI', 10), bg=primary, fg=foreground,
+                                 wraplength=FIELD_W - 40).place(x=20, y=chart_h // 2 - 10)
+                    else:
+                        signals = [row[1] for row in trend]
+                        fig = Figure(figsize=(FIELD_W / 100, (chart_h - 16) / 100), dpi=100, facecolor=primary)
+                        ax = fig.add_subplot(111)
+                        ax.plot(range(len(signals)), signals, color=ACCENT, linewidth=2)
+                        ax.axhline(0, color=gray, linewidth=1)
+                        ax.set_ylim(-1.05, 1.05)
+                        ax.set_yticks([-1, 0, 1])
+                        ax.set_yticklabels(['concerning', 'neutral', 'positive'])
+                        ax.set_facecolor(primary)
+                        ax.tick_params(colors=foreground, labelsize=7)
+                        for spine in ax.spines.values():
+                            spine.set_color(gray)
+                        fig.subplots_adjust(left=0.2, right=0.96, top=0.92, bottom=0.12)
+                        canvas = FigureCanvasTkAgg(fig, master=chart_frame)
+                        canvas.draw()
+                        canvas.get_tk_widget().place(x=8, y=8, width=FIELD_W - 16, height=chart_h - 16)
+
+                    # ---- Recent entries ----
+                    list_y = INPUT_Y + chart_h + 16
+                    tk.Label(self.main_frame, text='Recent entries', font=('Segoe UI', 11, 'bold'), bg=gray, fg=foreground).place(x=PAD, y=list_y)
+
+                    entries_h = CONTENT_H - list_y - 28 - 44
+                    entries_frame = tk.Frame(self.main_frame, bg=primary, relief='groove', bd=1)
+                    entries_frame.place(x=PAD, y=list_y + 28, width=FIELD_W, height=entries_h)
+
+                    recent = history_store.get_recent(limit=6)
+                    mood_icons = {}
+                    if not recent:
+                        tk.Label(entries_frame, text='No analyses yet - results you check will show up here.',
+                                 font=('Segoe UI', 10), bg=primary, fg=foreground).place(x=16, y=14)
+                    else:
+                        row_h = entries_h // len(recent)
+                        for i, (timestamp, mode, result, confidence, excerpt, signal) in enumerate(recent):
+                            icon_path = 'images/happy.png' if signal > 0.15 else ('images/sad.png' if signal < -0.15 else 'images/neutral.png')
+                            if icon_path not in mood_icons:
+                                mood_icons[icon_path] = ImageTk.PhotoImage(Image.open(icon_path).resize((20, 20)))
+                            row_y = i * row_h
+                            icon_lbl = tk.Label(entries_frame, image=mood_icons[icon_path], bg=primary, bd=0)
+                            icon_lbl.image = mood_icons[icon_path]
+                            icon_lbl.place(x=12, y=row_y + (row_h - 20) // 2)
+                            summary = f"{timestamp}  ·  {mode}  ·  {result} ({round(confidence * 100)}%)  —  {excerpt[:44]}"
+                            tk.Label(entries_frame, text=summary, font=('Segoe UI', 9), bg=primary, fg=foreground,
+                                     anchor='w').place(x=44, y=row_y + (row_h - 16) // 2, width=FIELD_W - 60, height=16)
+
+                    def clear_history():
+                        if messagebox.askyesno('Clear history', 'Delete all locally-stored mood history? This cannot be undone.'):
+                            history_store.clear()
+                            history()
+
+                    clear_btn = tk.Button(self.main_frame, text='Clear history', font=('Segoe UI', 9, 'bold'),
+                                          bg=gray, fg=foreground, bd=0, activebackground=gray, command=clear_history)
+                    clear_btn.place(x=PAD + FIELD_W - 130, y=CONTENT_H - 40, width=130, height=32)
+                # History Button
+                self.build_nav_item('history', 4, 'images/history.png', 'History', history)
+
+                def batch():
+                    self.master.title(f"{APP_NAME}  >  Batch")
+                    self.set_active_nav('batch')
+                    primary, foreground, gray = self.get_theme().as_tuple()
+                    for w in self.main_frame.winfo_children():
+                        w.destroy()
+                    for w in self.top_frame.winfo_children():
+                        w.destroy()
+
+                    tk.Label(self.top_frame, text='Batch', font=('Segoe UI', 16, 'bold'), bg=primary, fg=foreground).place(x=0, y=10)
+
+                    box_h = 90
+                    self.batch_box = tk.Text(self.main_frame, font=('Segoe UI', 10), bg=primary, fg=foreground,
+                                              insertbackground=foreground, relief='groove', bd=1, wrap='word', padx=10, pady=8)
+                    self.batch_box.place(x=PAD, y=INPUT_Y, width=FIELD_W, height=box_h)
+                    self.batch_box.insert(tk.END, 'Paste one entry per line - e.g. several journal entries or tweets - then press Run.\nOr upload a .txt/.csv file below (one entry per line).')
+
+                    def upload():
+                        filepath = filedialog.askopenfilename(title='Open entries', filetypes=(("Text/CSV", "*.txt *.csv"),))
+                        if not filepath:
+                            return
+                        with open(filepath, encoding='utf-8', errors='ignore') as file_:
+                            content = file_.read()
+                        self.batch_box.delete("1.0", tk.END)
+                        self.batch_box.insert(tk.END, content)
+
+                    upload_btn = tk.Button(self.main_frame, text='Upload .txt/.csv', font=('Segoe UI', 9, 'bold'),
+                                            bg=gray, fg=foreground, bd=0, activebackground=gray, command=upload)
+                    upload_btn.place(x=PAD, y=INPUT_Y + box_h + 8, width=150, height=30)
+
+                    summary_lbl = tk.Label(self.main_frame, text='Add entries above and press Run to see aggregate stats.',
+                                            font=('Segoe UI', 9), bg=gray, fg=foreground, wraplength=FIELD_W - 20, justify='left')
+                    summary_lbl.place(x=PAD, y=INPUT_Y + box_h + 46, width=FIELD_W, height=36)
+
+                    style = ttk.Style()
+                    style.theme_use('default')
+                    style.configure('Batch.Treeview', background=primary, foreground=foreground, fieldbackground=primary, rowheight=22, font=('Segoe UI', 9))
+                    style.map('Batch.Treeview', background=[('selected', ACCENT)], foreground=[('selected', ACCENT_TEXT)])
+                    style.configure('Batch.Treeview.Heading', background=gray, foreground=foreground, font=('Segoe UI', 9, 'bold'))
+
+                    tree_y = INPUT_Y + box_h + 90
+                    tree_h = CONTENT_H - tree_y - 4
+                    columns = ('entry', 'polarity', 'depression', 'confidence')
+                    tree = ttk.Treeview(self.main_frame, columns=columns, show='headings', style='Batch.Treeview', height=max(1, int(tree_h / 22)))
+                    tree.heading('entry', text='Entry')
+                    tree.heading('polarity', text='Polarity')
+                    tree.heading('depression', text='Depression')
+                    tree.heading('confidence', text='Confidence')
+                    tree.column('entry', width=FIELD_W - 300, anchor='w')
+                    tree.column('polarity', width=100, anchor='center')
+                    tree.column('depression', width=140, anchor='center')
+                    tree.column('confidence', width=90, anchor='center')
+                    tree.place(x=PAD, y=tree_y, width=FIELD_W, height=tree_h)
+
+                    def run():
+                        raw = self.batch_box.get("1.0", 'end-1c')
+                        entries = [line.strip() for line in raw.splitlines() if line.strip()]
+                        if not entries:
+                            messagebox.showerror("Entry error", "Add at least one non-empty line first.")
+                            return
+                        for row in tree.get_children():
+                            tree.delete(row)
+
+                        pol_counts = {'positive': 0, 'neutral': 0, 'negative': 0}
+                        dep_flagged = 0
+                        dep_confidences = []
+                        for entry in entries:
+                            scores = analysis_service.score_polarity(entry)
+                            dominant = max(scores, key=scores.get)
+                            pol_counts[dominant] += 1
+                            history_store.log_entry(mode='polarity', text=entry, result=dominant, confidence=scores[dominant] / 100, source='batch')
+
+                            dep_result = analysis_service.score_depression(entry)
+                            if dep_result.is_depressive:
+                                dep_flagged += 1
+                            dep_confidences.append(dep_result.confidence)
+                            history_store.log_entry(mode='depression', text=entry,
+                                                     result='depressive' if dep_result.is_depressive else 'not depressive',
+                                                     confidence=dep_result.confidence, source='batch')
+
+                            tree.insert('', 'end', values=(
+                                entry[:60], dominant,
+                                'depressive' if dep_result.is_depressive else 'not depressive',
+                                f"{round(dep_result.confidence * 100)}%",
+                            ))
+
+                        n = len(entries)
+                        avg_conf = sum(dep_confidences) / n
+                        summary_lbl.configure(text=(
+                            f"{n} entries  ·  polarity: {round(pol_counts['positive'] / n * 100)}% positive / "
+                            f"{round(pol_counts['neutral'] / n * 100)}% neutral / {round(pol_counts['negative'] / n * 100)}% negative  ·  "
+                            f"depression-language: {dep_flagged}/{n} flagged (avg confidence {round(avg_conf * 100)}%)"
+                        ))
+
+                    run_btn = tk.Button(self.main_frame, text='Run batch analysis', font=('Segoe UI', 9, 'bold'),
+                                         bg=ACCENT, fg=ACCENT_TEXT, bd=0, activebackground=ACCENT_HOVER, command=run)
+                    run_btn.place(x=PAD + FIELD_W - 160, y=INPUT_Y + box_h + 8, width=160, height=30)
+                    hover.Hover(run_btn)
+                # Batch Button
+                self.build_nav_item('batch', 5, 'images/batch.png', 'Batch', batch)
+
                 def settings():
                     self.master.title(f"{APP_NAME}  >  Settings")
                     self.set_active_nav('settings')
@@ -674,6 +917,8 @@ class App:
                         w.destroy()
 
                     tk.Label(self.top_frame,text='Settings',font=('Segoe UI',16,'bold'),bg=primary,fg=foreground).place(x=0,y=10)
+                    tk.Label(self.top_frame, text='Keyboard: Alt+1-7 jump to a tab  ·  Ctrl+Enter submits the active form',
+                             font=('Segoe UI', 9), bg=primary, fg=gray).place(x=0, y=44)
 
                     notif_img = ImageTk.PhotoImage(Image.open('images/notification.png').resize((22,22)))
                     self.notif_lbl = tk.Label(self.main_frame,text='  Notifications',font=('Segoe UI',11,'bold'),image=notif_img,compound='left',bg=gray,fg=foreground)
@@ -734,10 +979,32 @@ class App:
                     self.light.place(relx=0.15,rely=0.28)
                     self.dark.place(relx=0.55,rely=0.28)
 
-                self.build_nav_item('settings', 4, 'images/settings.png', 'Settings', settings)
+                self.build_nav_item('settings', 6, 'images/settings.png', 'Settings', settings)
 
                 text() # Run the text function on start
-              
+
+                # ---- Keyboard shortcuts: Alt+1..7 jump straight to a nav
+                # row (in NAV_ORDER's order), Ctrl+Enter submits whichever
+                # form is active - lets the whole app be driven without a
+                # mouse. Bound on the window, not per-widget, so they work
+                # no matter which tab/field currently has focus.
+                def make_nav_shortcut(nav_key):
+                    def handler(event=None):
+                        btn = self.nav_buttons.get(nav_key)
+                        if btn is not None:
+                            btn.invoke()
+                    return handler
+
+                for i, nav_key in enumerate(NAV_ORDER):
+                    self.master.bind_all(f"<Alt-Key-{i + 1}>", make_nav_shortcut(nav_key))
+
+                def submit_shortcut(event=None):
+                    submit_btn = getattr(self, 'submit', None)
+                    if submit_btn is not None and str(submit_btn['state']) != tk.DISABLED:
+                        submit_btn.invoke()
+
+                self.master.bind_all("<Control-Return>", submit_shortcut)
+
             self.show_loading(primary, foreground, continue_)
         # Home Page
         self.bg_img = tk.PhotoImage(file='images/bg.png')
@@ -759,17 +1026,25 @@ class App:
         self.getstarted.bind("<Return>",getstarted) # Bind the return(enter) key to the get started function"""
 
 if __name__=='__main__':
-    root = tk.Tk() 
-    
-    conn = sqlite3.connect("Data/Data.db")
-    c = conn.cursor() 
+    # Makes every bare 'images/...' path resolve correctly regardless of the
+    # launching directory - required for a packaged build, where bundled
+    # files live in a PyInstaller _internal/ folder rather than wherever the
+    # user double-clicked from. See Extensions/runtime_paths.py.
+    os.chdir(bundled_root())
 
-    imagescount = len(glob.glob('images/*png')) + len(glob.glob('images/*ico')) + len(glob.glob('images/*gif'))
-    if imagescount != 24:
-        messagebox.showerror("File Error",str(24-imagescount)+" File(s) missing from images")
-    else:
-        pass
+    root = tk.Tk()
+
+    # Deliberately app_root() (next to the exe), not bundled_root() (which
+    # may be _internal/) - user data doesn't belong inside a folder named
+    # for bundled/internal files.
+    data_dir = app_root() / "Data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(data_dir / "Data.db"))
+
+    missing = [name for name in REQUIRED_IMAGES if not Path('images', name).exists()]
+    if missing:
+        messagebox.showerror("File Error", "Missing from images/: " + ", ".join(missing))
 
     app = App(root)
-    
+
     root.mainloop()

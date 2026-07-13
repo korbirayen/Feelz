@@ -19,6 +19,14 @@ DARK_THEME = DEFAULT_THEME
 class ThemeStore:
     def __init__(self, connection):
         self.connection = connection
+        # Self-healing: a fresh/packaged build's Data.db won't have this
+        # table yet (only the repo's checked-in seed copy does), and without
+        # it load()/save() would hit "no such table: Color" instead of
+        # falling back to DEFAULT_THEME.
+        self.connection.execute(
+            'CREATE TABLE IF NOT EXISTS Color ("Primary" TEXT, "Foreground" TEXT, "Gray" TEXT)'
+        )
+        self.connection.commit()
 
     def load(self):
         cursor = self.connection.cursor()
@@ -30,10 +38,19 @@ class ThemeStore:
 
     def save(self, theme):
         cursor = self.connection.cursor()
-        cursor.execute(
-            'UPDATE Color SET "Primary" = ?, "Foreground" = ?, "Gray" = ?',
-            theme.as_tuple(),
-        )
+        cursor.execute('SELECT COUNT(*) FROM Color')
+        (count,) = cursor.fetchone()
+        if count:
+            cursor.execute(
+                'UPDATE Color SET "Primary" = ?, "Foreground" = ?, "Gray" = ?',
+                theme.as_tuple(),
+            )
+        else:
+            # No seed row (fresh/packaged build) - insert instead of a no-op UPDATE.
+            cursor.execute(
+                'INSERT INTO Color ("Primary", "Foreground", "Gray") VALUES (?, ?, ?)',
+                theme.as_tuple(),
+            )
         self.connection.commit()
 
     def set_mode(self, mode):
