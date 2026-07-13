@@ -1,6 +1,8 @@
 import tkinter as tk
-from PIL import Image, ImageTk
 from itertools import count
+
+from PIL import Image, ImageTk
+
 
 class ImageLabel(tk.Label):
     """a label that displays images, and plays them if they are gifs"""
@@ -19,7 +21,7 @@ class ImageLabel(tk.Label):
 
         try:
             self.delay = im.info['duration']
-        except:
+        except KeyError:
             self.delay = 100
 
         if len(self.frames) == 1:

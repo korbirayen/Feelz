@@ -1,5 +1,6 @@
 import io
-import sys, os
+import os
+import sys
 
 pathname = os.path.dirname(sys.argv[0])
 os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", pathname+"/Extensions/feelz-vision.json")

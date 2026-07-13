@@ -1,5 +1,6 @@
 import tkinter as tk
 
+
 class CreateToolTip(object):
     '''
     create a tooltip for a given widget
@@ -25,4 +26,4 @@ class CreateToolTip(object):
         lbl.pack(ipadx=1)
     def close(self, event=None):
         if self.top:
-            self.top.destroy()        
+            self.top.destroy()

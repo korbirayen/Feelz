@@ -1,4 +1,3 @@
-import tkinter as tk
 class Hover(object):
     '''
     Hover BG colour for a given widget
@@ -11,4 +10,3 @@ class Hover(object):
         self.widget.config(bg='#c28e1a')
     def close(self, event=None):
         self.widget.config(bg='#ecb22e')
-             

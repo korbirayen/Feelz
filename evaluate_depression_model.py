@@ -122,7 +122,7 @@ def main():
         json.dump(results, f, indent=2)
 
     with (RESULTS_DIR / "metrics.md").open("w") as f:
-        f.write(f"# Depression-language classifier evaluation\n\n")
+        f.write("# Depression-language classifier evaluation\n\n")
         f.write(
             f"Stratified 80/20 split, seed={RANDOM_STATE}, "
             f"{len(train)} train / {len(test)} test tweets "

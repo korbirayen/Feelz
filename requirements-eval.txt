@@ -1,3 +1,4 @@
-# Extra dependencies for evaluate_depression_model.py only.
-# The app itself only needs scikit-learn (already in requirements.txt).
-matplotlib
+# matplotlib is already in requirements.txt (the app's History tab embeds a
+# chart). Nothing extra is needed to run evaluate_depression_model.py beyond
+# the base requirements - this file is kept as an explicit marker for CI.
+
